@@ -2,14 +2,13 @@ package com.gionee.catchchick;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.media.AudioManager;
+import android.media.MediaPlayer;
 import android.support.v4.util.LruCache;
 import android.os.Bundle;
 import android.util.Log;
@@ -25,7 +24,6 @@ import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
 
-
     private SurfaceHolder mSurfaceHolder;
     private SurfaceView mSurfaceView;
     private Resources mResources;
@@ -35,6 +33,7 @@ public class MainActivity extends Activity {
     private Bitmap mBitmap;
     private int[] mChickId;
     private int mPressure;
+
 
     private String mPackageName;
 
@@ -49,8 +48,9 @@ public class MainActivity extends Activity {
     private LruCache<String, Bitmap> mLruCache;
     private ThreadPoolExecutor executor;
 
-    private Utils mUtils;
-    private AudioManager mAudioManager;
+    private MediaPlayer mBgMusic;
+    private MediaPlayer mCrow;
+
 
     @SuppressLint("ClickableViewAccessibility")
     @Override
@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         isDown = true;
                         isUp = false;
+                        mCrow.start();
                         new Thread(new Runnable() {
                             @Override
                             public void run() {
@@ -87,6 +88,8 @@ public class MainActivity extends Activity {
                     case MotionEvent.ACTION_UP:
                         isUp = true;
                         isDown = false;
+                        mCrow.pause();
+                        mCrow.seekTo(0);
                         new Thread(new Runnable() {
                             @Override
                             public void run() {
@@ -94,10 +97,10 @@ public class MainActivity extends Activity {
                                 while (isUp) {
                                     if (mPressure > 0) {
                                         setPressure(i);
-                                        float ratio = (float) mPressure / i;
-                                        if (ratio <= 0) {
-                                            ratio = 1;
-                                        }
+//                                        float ratio = (float) mPressure / i;
+//                                        if (ratio <= 0) {
+//                                            ratio = 1;
+//                                        }
                                         i--;
 //                                        long time = (long) (5 * ratio);
 //                                        SystemClock.sleep(time);
@@ -143,7 +146,7 @@ public class MainActivity extends Activity {
 
         //init the LruCache
         int maxSize = (int) (Runtime.getRuntime().maxMemory()) / 1024;
-        mLruCache = new LruCache<String, Bitmap>(maxSize / 2) {
+        mLruCache = new LruCache<String, Bitmap>(maxSize * 2 / 3) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
                 return bitmap.getByteCount() / 1024;
@@ -151,13 +154,13 @@ public class MainActivity extends Activity {
         };
 
         //init the ThreadPoolExecutor and prepare the cache
-        executor = new ThreadPoolExecutor(8, 15, 10, TimeUnit.MINUTES,
-                new LinkedBlockingDeque<Runnable>(8));
+        executor = new ThreadPoolExecutor(10, 15, 10, TimeUnit.MINUTES,
+                new LinkedBlockingDeque<Runnable>(10));
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < 7; i++) {
                     inTask.put(i, 1);
                     MyTask task = new MyTask(i);
                     executor.execute(task);
@@ -166,35 +169,12 @@ public class MainActivity extends Activity {
         }).start();
 
         //background music
-        mAudioManager = (AudioManager) this.getSystemService(Context.AUDIO_SERVICE);
-        mUtils = new Utils(this, mAudioManager);
-        mUtils.playMusic();
+        mCrow = MediaPlayer.create(this, R.raw.crow1);
+        mBgMusic = MediaPlayer.create(this, R.raw.music_bg);
+        mBgMusic.setVolume(0.6f, 0.6f);
+        mBgMusic.setLooping(true);
+        mBgMusic.start();
     }
-
-
-    /**
-     * Callback for SurfaceView
-     */
-    private SurfaceHolder.Callback callback = new SurfaceHolder.Callback() {
-        @Override
-        public void surfaceCreated(SurfaceHolder holder) {
-            drawBitmap(mChickId[0], 0);
-        }
-
-        @Override
-        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-            mWidth = width;
-            mHeight = height;
-            mRect = new Rect(0, 0, mWidth, mHeight);
-            mChickRect = new Rect(0, 0, mWidth, mHeight);
-            drawBitmap(mChickId[0], 0);
-        }
-
-        @Override
-        public void surfaceDestroyed(SurfaceHolder holder) {
-
-        }
-    };
 
 
     /**
@@ -225,67 +205,34 @@ public class MainActivity extends Activity {
             mPressure = 0;
         }
 
-        drawBitmap(mChickId[mPressure], mPressure);
-
         //remove the old cache
-        if (pressure - 7 > 0 && isDown) {
+        if (pressure - 7 >= 0 && isDown) {
             removeBitmapFromMemoryCache(pressure - 7);
+        }
+        if (pressure + 7 <= 100 && isUp) {
+            removeBitmapFromMemoryCache(pressure + 7);
         }
 
         //prepare the cache
         if (isDown) {
-            if (pressure + 4 < 101 && inTask.get(pressure + 4) == 0) {
-                inTask.put(pressure + 4, 1);
-                MyTask task = new MyTask(pressure + 4);
-                executor.execute(task);
-            }
-            if (pressure + 5 < 101 && inTask.get(pressure + 5) == 0) {
-                inTask.put(pressure + 5, 1);
-                MyTask task = new MyTask(pressure + 5);
-                executor.execute(task);
-            }
-            if (pressure + 6 < 101 && inTask.get(pressure + 6) == 0) {
-                inTask.put(pressure + 6, 1);
-                MyTask task = new MyTask(pressure + 6);
-                executor.execute(task);
+            for (int i = 4; i <= 7; i++) {
+                if (pressure + i < 101 && inTask.get(pressure + i) == 0) {
+                    inTask.put(pressure + i, 1);
+                    MyTask task = new MyTask(pressure + i);
+                    executor.execute(task);
+                }
             }
         } else {
-            if (pressure - 4 > 0 && inTask.get(pressure - 4) == 0) {
-                inTask.put(pressure - 4, 1);
-                MyTask task = new MyTask(pressure - 4);
-                executor.execute(task);
-            }
-            if (pressure - 5 > 0 && inTask.get(pressure - 5) == 0) {
-                inTask.put(pressure - 5, 1);
-                MyTask task = new MyTask(pressure - 5);
-                executor.execute(task);
-            }
-            if (pressure - 6 > 0 && inTask.get(pressure - 6) == 0) {
-                inTask.put(pressure - 6, 1);
-                MyTask task = new MyTask(pressure - 6);
-                executor.execute(task);
+            for (int i = 4; i <= 7; i++) {
+                if (pressure - i >= 0 && inTask.get(pressure - i) == 0) {
+                    inTask.put(pressure - i, 1);
+                    MyTask task = new MyTask(pressure - i);
+                    executor.execute(task);
+                }
             }
         }
-    }
+        drawBitmap(mChickId[mPressure], mPressure);
 
-
-
-    /**
-     * Sets the activity with an immersive experience
-     *
-     * @param hasFocus
-     */
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        View decorView = getWindow().getDecorView();
-        decorView.setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
     }
 
 
@@ -336,6 +283,7 @@ public class MainActivity extends Activity {
                 Log.d("draw", "draw_time: " + (System.currentTimeMillis() - time2) + " pressure: " + pressure);
             }
         }
+        Log.d("total", "total: " + (System.currentTimeMillis() - time) + " pressure: " + pressure);
     }
 
 
@@ -410,4 +358,71 @@ public class MainActivity extends Activity {
             inTask.put(pressure, 0);
         }
     }
+
+
+    /**
+     * Callback for SurfaceView
+     */
+    private SurfaceHolder.Callback callback = new SurfaceHolder.Callback() {
+        @Override
+        public void surfaceCreated(SurfaceHolder holder) {
+            drawBitmap(mChickId[0], 0);
+        }
+
+        @Override
+        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            mWidth = width;
+            mHeight = height;
+            mRect = new Rect(0, 0, mWidth, mHeight);
+            mChickRect = new Rect(0, 0, mWidth, mHeight);
+            drawBitmap(mChickId[0], 0);
+        }
+
+        @Override
+        public void surfaceDestroyed(SurfaceHolder holder) {
+        }
+    };
+
+
+    @Override
+    protected void onResume() {
+        Log.d("onResume", "onResume: ");
+        super.onResume();
+        mBgMusic.start();
+    }
+
+    @Override
+    protected void onPause() {
+        Log.d("onPause", "onPause: ");
+        super.onPause();
+        mBgMusic.pause();
+        mCrow.pause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        mBgMusic.stop();
+        mCrow.stop();
+    }
+
+
+    /**
+     * Sets the activity with an immersive experience
+     *
+     * @param hasFocus
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        View decorView = getWindow().getDecorView();
+        decorView.setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+    }
+
 }
